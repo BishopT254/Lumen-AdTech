@@ -1,0 +1,1014 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Authentication Models
+model User {
+  id                  String               @id @default(cuid())
+  name                String?
+  email               String               @unique
+  emailVerified       DateTime?
+  image               String?
+  password            String?
+  role                UserRole             @default(ADVERTISER)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  accounts            Account[]
+  sessions            Session[]
+  advertiser          Advertiser?
+  partner             Partner?
+  admin               Admin?
+  configChanges       ConfigAuditLog[]
+  systemConfigs       SystemConfig[]
+  featureFlags        FeatureFlag[]
+  notifications       Notification[]
+  userPreference      UserPreference?
+  apiKeys             ApiKey[]
+  AudienceSegment     AudienceSegment[]
+  bio                 String?
+  deviceRegistrations DeviceRegistration[]
+  activityLogs        ActivityLog[] // New relation
+  loginHistory        LoginHistory[] // New relation
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // New fields for session tracking
+  device       String?
+  browser      String?
+  ipAddress    String?
+  location     String?
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// User Role Enum
+enum UserRole {
+  ADMIN
+  ADVERTISER
+  PARTNER
+}
+
+// Advertiser Module
+model Advertiser {
+  id             String          @id @default(cuid())
+  userId         String          @unique
+  companyName    String
+  contactPerson  String
+  phoneNumber    String
+  address        String?
+  city           String?
+  country        String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns      Campaign[]
+  payments       Payment[]
+  billings       Billing[]
+  paymentMethods PaymentMethod[]
+  state          String? // New field
+  postalCode     String? // New field
+}
+
+// Campaign Module Models
+
+model Campaign {
+  id                    String                  @id @default(cuid())
+  advertiserId          String
+  name                  String                  @db.VarChar(100)
+  description           String?                 @db.Text
+  status                CampaignStatus          @default(DRAFT)
+  objective             CampaignObjective       @default(AWARENESS)
+  budget                Decimal                 @db.Decimal(10, 2)
+  dailyBudget           Decimal?                @db.Decimal(10, 2)
+  startDate             DateTime
+  endDate               DateTime?
+  targetLocations       Json? // JSON array of location data
+  targetSchedule        Json? // JSON object with scheduling info
+  targetDemographics    Json? // JSON object with demographic targets
+  pricingModel          PricingModel            @default(CPM)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  advertiser            Advertiser              @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  adCreatives           AdCreative[]
+  adDeliveries          AdDelivery[]
+  analytics             CampaignAnalytics[]
+  billings              Billing[]
+  abTests               ABTest[]
+  sustainabilityMetrics SustainabilityMetrics[] // New relation
+  AudienceSegment       AudienceSegment?        @relation(fields: [audienceSegmentId], references: [id])
+  audienceSegmentId     String?
+
+  @@index([advertiserId])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([createdAt])
+}
+
+model AdCreative {
+  id              String          @id @default(cuid())
+  campaignId      String
+  name            String          @db.VarChar(100)
+  type            CreativeType
+  status          CreativeStatus  @default(DRAFT)
+  content         String // URL to the creative content
+  format          String // File format or content type
+  duration        Int? // Duration in seconds for video content
+  previewImage    String? // URL to preview image
+  headline        String          @db.VarChar(100)
+  description     String          @db.Text
+  callToAction    String          @db.VarChar(50)
+  isApproved      Boolean         @default(false)
+  rejectionReason String?         @db.Text
+  ar_markers      Json? // JSON data for AR markers and triggers
+  voiceCommands   Json? // JSON data for supported voice commands
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  campaign        Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  adDeliveries    AdDelivery[]
+  emotionData     EmotionData[]
+  abTestVariants  ABTestVariant[]
+
+  @@index([campaignId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ABTest {
+  id               String          @id @default(cuid())
+  campaignId       String
+  name             String          @db.VarChar(100)
+  description      String?         @db.Text
+  status           ABTestStatus    @default(DRAFT)
+  startDate        DateTime
+  endDate          DateTime?
+  winningVariantId String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  campaign         Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  variants         ABTestVariant[]
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model ABTestVariant {
+  id                String     @id @default(cuid())
+  abTestId          String
+  adCreativeId      String
+  name              String     @db.VarChar(100)
+  trafficAllocation Decimal    @db.Decimal(5, 2) // Percentage of traffic (0-100)
+  impressions       Int        @default(0)
+  engagements       Int        @default(0)
+  conversions       Int        @default(0)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  abTest            ABTest     @relation(fields: [abTestId], references: [id], onDelete: Cascade)
+  adCreative        AdCreative @relation(fields: [adCreativeId], references: [id])
+
+  @@index([abTestId])
+  @@index([adCreativeId])
+}
+
+model CampaignAnalytics {
+  id               String   @id @default(cuid())
+  campaignId       String
+  date             DateTime
+  impressions      Int      @default(0)
+  engagements      Int      @default(0)
+  conversions      Int      @default(0)
+  ctr              Decimal  @db.Decimal(10, 4) // Click-through rate
+  conversionRate   Decimal  @db.Decimal(10, 4)
+  averageDwellTime Decimal? @db.Decimal(10, 2) // In seconds
+  audienceMetrics  Json? // Demographics, engagement patterns
+  emotionMetrics   Json? // Aggregated emotional responses
+  costData         Json // Spend, CPM, CPE, CPA metrics
+  campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, date])
+  @@index([campaignId])
+  @@index([date])
+}
+
+model EmotionData {
+  id            String     @id @default(cuid())
+  adCreativeId  String
+  adDeliveryId  String
+  timestamp     DateTime
+  joyScore      Decimal?   @db.Decimal(4, 3) // 0-1 score for joy emotion
+  surpriseScore Decimal?   @db.Decimal(4, 3) // 0-1 score for surprise emotion
+  neutralScore  Decimal?   @db.Decimal(4, 3) // 0-1 score for neutral emotion
+  dwellTime     Decimal?   @db.Decimal(10, 2) // In seconds
+  viewerCount   Int?
+  isAggregated  Boolean    @default(true) // Flag for privacy compliance
+  adCreative    AdCreative @relation(fields: [adCreativeId], references: [id], onDelete: Cascade)
+  adDelivery    AdDelivery @relation(fields: [adDeliveryId], references: [id], onDelete: Cascade)
+
+  @@index([adCreativeId])
+  @@index([adDeliveryId])
+  @@index([timestamp])
+}
+
+// Enums for Campaign Module
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  PAUSED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum CampaignObjective {
+  AWARENESS
+  CONSIDERATION
+  CONVERSION
+  TRAFFIC
+  ENGAGEMENT
+}
+
+enum PricingModel {
+  CPM // Cost Per Thousand Impressions
+  CPE // Cost Per Engagement
+  CPA // Cost Per Action
+  HYBRID
+}
+
+enum CreativeType {
+  IMAGE
+  VIDEO
+  TEXT
+  HTML
+  INTERACTIVE
+  AR_EXPERIENCE
+  VOICE_INTERACTIVE
+}
+
+enum CreativeStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum ABTestStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+// Partner Module
+model Partner {
+  id                  String               @id @default(cuid())
+  userId              String               @unique
+  companyName         String
+  contactPerson       String
+  phoneNumber         String
+  address             String?
+  city                String?
+  country             String?
+  commissionRate      Decimal              @default(0.3) @db.Decimal(5, 2) // 30% default commission
+  paymentDetails      Json? // Payment account details
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices             Device[]
+  earnings            PartnerEarning[]
+  deviceRegistrations DeviceRegistration[]
+  wallet              Wallet?
+  Payment             Payment[]
+  state               String? // New field
+  postalCode          String? // New field
+  businessType        String? // New field
+  taxInformation      Json? // New field
+  status              PartnerStatus        @default(PENDING) // New field
+  verificationStatus  VerificationStatus   @default(PENDING) // New field
+}
+
+// New enums for Partner
+enum PartnerStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// Device Management
+model Device {
+  id                    String                  @id @default(cuid())
+  partnerId             String
+  name                  String
+  deviceIdentifier      String                  @unique
+  deviceType            DeviceType
+  location              Json
+  routeDetails          Json?
+  status                DeviceStatus            @default(PENDING)
+  lastActive            DateTime?
+  healthStatus          HealthStatus            @default(UNKNOWN)
+  firmwareVersion       String? // Added field for firmware version
+  capabilities          Json? // Added field for device capabilities
+  configSettings        Json? // Added field for device configuration
+  maintenanceHistory    Json? // Added field for maintenance history
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  partner               Partner                 @relation(fields: [partnerId], references: [id])
+  adDeliveries          AdDelivery[]
+  deviceAnalytics       DeviceAnalytics[]
+  availability          DeviceAvailability[]
+  sustainabilityMetrics SustainabilityMetrics[]
+  registration          DeviceRegistration?
+  impressions           Int?                    @default(0) // New field
+  revenue               Float?                  @default(0) // New field
+
+  @@index([partnerId])
+  @@index([deviceType])
+  @@index([status])
+  @@index([healthStatus])
+  @@index([firmwareVersion])
+}
+
+enum DeviceType {
+  ANDROID_TV
+  DIGITAL_SIGNAGE
+  INTERACTIVE_KIOSK
+  VEHICLE_MOUNTED
+  RETAIL_DISPLAY
+  BUS
+  TRAM
+  TRAIN
+  METRO
+  OTHER
+}
+
+enum DeviceStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  MAINTENANCE
+}
+
+enum HealthStatus {
+  UNKNOWN
+  HEALTHY
+  WARNING
+  CRITICAL
+  OFFLINE
+}
+
+// Device Registration Model
+model DeviceRegistration {
+  id                   String             @id @default(cuid())
+  deviceId             String             @unique
+  partnerId            String
+  userId               String
+  registrationCode     String             @unique
+  deviceIdentifier     String             @unique
+  deviceName           String?
+  deviceType           DeviceType?
+  location             Json?
+  metadata             Json?
+  tags                 String[]
+  notes                String?
+  autoActivate         Boolean            @default(false)
+  firmwareVersion      String?
+  capabilities         Json?
+  configSettings       Json?
+  status               RegistrationStatus @default(PENDING)
+  registrationAttempts Int                @default(0)
+  lastAttemptAt        DateTime?
+  completedAt          DateTime?
+  expiresAt            DateTime
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  device  Device  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([partnerId])
+  @@index([userId])
+  @@index([registrationCode])
+  @@index([deviceIdentifier])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([registrationAttempts])
+}
+
+enum RegistrationStatus {
+  PENDING
+  COMPLETED
+  INVALID
+  EXPIRED
+}
+
+// Ad Delivery Module
+model AdDelivery {
+  id                 String         @id @default(cuid())
+  campaignId         String
+  adCreativeId       String
+  deviceId           String
+  scheduledTime      DateTime
+  actualDeliveryTime DateTime?
+  viewerCount        Int? // Estimated via computer vision
+  impressions        Int            @default(0)
+  engagements        Int            @default(0)
+  completions        Int            @default(0)
+  status             DeliveryStatus @default(SCHEDULED)
+  locationData       Json? // Location at time of delivery
+  weatherData        Json? // Weather conditions at delivery time
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  campaign           Campaign       @relation(fields: [campaignId], references: [id])
+  adCreative         AdCreative     @relation(fields: [adCreativeId], references: [id])
+  device             Device         @relation(fields: [deviceId], references: [id])
+  emotionData        EmotionData[]
+  audienceData       AudienceData[] // New relation
+
+  @@index([campaignId])
+  @@index([adCreativeId])
+  @@index([deviceId])
+  @@index([scheduledTime])
+  @@index([status])
+}
+
+enum DeliveryStatus {
+  SCHEDULED
+  DELIVERED
+  FAILED
+  SKIPPED
+  PENDING
+}
+
+// Analytics Module
+model DeviceAnalytics {
+  id                 String   @id @default(cuid())
+  deviceId           String
+  date               DateTime
+  uptime             Decimal  @db.Decimal(10, 2) // In hours
+  impressionsServed  Int
+  engagementsCount   Int
+  averageViewerCount Decimal? @db.Decimal(10, 2)
+  performanceMetrics Json? // CPU, memory, network stats
+  energyConsumption  Decimal? @db.Decimal(10, 2) // For carbon footprint tracking
+  device             Device   @relation(fields: [deviceId], references: [id])
+
+  @@index([deviceId])
+  @@index([date])
+}
+
+// Admin Module
+model Admin {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  permissions Json // JSON array of specific admin permissions
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Payment & Billing Module
+
+// Payment Method model for storing advertiser's payment methods (credit cards, etc.)
+model PaymentMethod {
+  id           String              @id @default(cuid())
+  walletId     String?
+  wallet       Wallet?             @relation(fields: [walletId], references: [id])
+  type         PaymentMethodType
+  details      Json?
+  isDefault    Boolean             @default(false)
+  isVerified   Boolean             @default(false)
+  lastUsed     DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  payments     Payment[]
+  Advertiser   Advertiser?         @relation(fields: [advertiserId], references: [id])
+  advertiserId String?
+  status       PaymentMethodStatus @default(ACTIVE)
+  Transaction  Transaction[]
+  // Keep existing fields that have data
+  expMonth     Int?
+  expYear      Int?
+  expiryDate   Int?
+  last4        String?
+
+  @@index([walletId])
+}
+
+enum PaymentMethodStatus {
+  ACTIVE
+  UNVERIFIED
+  SUSPENDED_TEMPORARY
+  SUSPENDED_PERMANENT
+}
+
+// Keep all existing enum values to avoid breaking changes
+enum PaymentMethodType {
+  VISA
+  MASTERCARD
+  AMEX
+  OTHER
+  BANK_TRANSFER
+  MPESA
+  FLUTTERWAVE
+  PAYPAL
+  STRIPE
+  CREDIT_CARD
+}
+
+model Payment {
+  id                String             @id @default(cuid())
+  partnerId         String?
+  partner           Partner?           @relation(fields: [partnerId], references: [id])
+  amount            Decimal            @db.Decimal(10, 2)
+  currency          String             @default("USD")
+  status            PaymentStatus      @default(PENDING)
+  type              PaymentType        @default(DEPOSIT)
+  description       String?
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  billings          Billing[]
+  paymentMethodId   String?
+  paymentMethod     PaymentMethod?     @relation(fields: [paymentMethodId], references: [id])
+  Advertiser        Advertiser?        @relation(fields: [advertiserId], references: [id])
+  advertiserId      String?
+  // Keep existing fields that have data
+  dateInitiated     DateTime?
+  dateCompleted     DateTime?
+  transactionId     String?
+  receiptUrl        String?
+  paymentMethodType PaymentMethodType? @map("paymentMethod") // Renamed field but still maps to the same column
+
+  @@index([partnerId])
+  @@index([paymentMethodId])
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  PROCESSED // Added for compatibility with PartnerEarning
+  PAID // Added for compatibility with PartnerEarning
+  CANCELLED // Added for compatibility with PartnerEarning
+}
+
+model Billing {
+  id            String        @id @default(cuid())
+  advertiserId  String
+  campaignId    String
+  paymentId     String?
+  invoiceNumber String        @unique
+  amount        Decimal       @db.Decimal(10, 2)
+  tax           Decimal       @db.Decimal(10, 2)
+  total         Decimal       @db.Decimal(10, 2)
+  status        BillingStatus @default(UNPAID)
+  dueDate       DateTime
+  items         Json // Line items details
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  advertiser    Advertiser    @relation(fields: [advertiserId], references: [id])
+  campaign      Campaign      @relation(fields: [campaignId], references: [id])
+  payment       Payment?      @relation(fields: [paymentId], references: [id])
+
+  @@index([advertiserId])
+  @@index([campaignId])
+  @@index([paymentId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+enum BillingStatus {
+  UNPAID
+  PAID
+  OVERDUE
+  CANCELLED
+  PARTIALLY_PAID
+}
+
+model PartnerEarning {
+  id               String        @id @default(cuid())
+  partnerId        String
+  periodStart      DateTime
+  periodEnd        DateTime
+  totalImpressions Int
+  totalEngagements Int
+  amount           Decimal       @db.Decimal(10, 2)
+  status           PaymentStatus @default(PENDING) // Changed to use PaymentStatus for compatibility
+  paidDate         DateTime?
+  transactionId    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  partner          Partner       @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+}
+
+// System Configuration
+model SystemConfig {
+  id               String   @id @default(cuid())
+  configKey        String   @unique
+  configValue      Json
+  description      String?
+  lastUpdated      DateTime @updatedAt
+  updatedBy        String? // User ID who made the last update
+  isEncrypted      Boolean  @default(false) // Flag for sensitive data
+  validationSchema String? // JSON schema for validation
+  environment      String? // For environment-specific configs
+  version          Int      @default(1) // For tracking config versions
+
+  // Add proper relation to user - make it optional to maintain backward compatibility
+  user User? @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([updatedBy])
+  @@index([environment])
+}
+
+// Audit log for tracking changes to system configurations
+model ConfigAuditLog {
+  id            String   @id @default(cuid())
+  configKey     String
+  previousValue Json?
+  newValue      Json
+  changedBy     String // User ID
+  changeDate    DateTime @default(now())
+  ipAddress     String?
+  userAgent     String?
+  changeReason  String? // Optional reason for the change
+  user          User     @relation(fields: [changedBy], references: [id], onDelete: Cascade)
+
+  @@index([configKey])
+  @@index([changedBy])
+  @@index([changeDate])
+}
+
+// Access control for configuration settings
+model ConfigAccess {
+  id        String   @id @default(cuid())
+  configKey String
+  userRole  UserRole // Admin, SuperAdmin, etc.
+  canView   Boolean  @default(true)
+  canEdit   Boolean  @default(false)
+
+  @@unique([configKey, userRole])
+}
+
+// Feature flags for phased rollouts
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  enabled     Boolean  @default(false)
+  conditions  Json? // Conditions under which the feature is enabled
+  percentage  Int? // Percentage of users who get the feature (for gradual rollouts)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String? // User ID
+
+  // Add proper relation to user
+  user User? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@index([enabled])
+  @@index([createdBy])
+}
+
+// NEW MODELS
+
+// 1. Notification System
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  message     String
+  type        String // INFO, WARNING, SUCCESS, ERROR
+  isRead      Boolean  @default(false)
+  category    String   @default("system")
+  actionUrl   String?
+  sender      String?
+  relatedData Json? // Optional related data
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([isRead])
+  @@index([type])
+  @@index([category])
+}
+
+// 2. Device Availability for better scheduling
+model DeviceAvailability {
+  id        String   @id @default(cuid())
+  deviceId  String
+  startTime DateTime
+  endTime   DateTime
+  isBooked  Boolean  @default(false)
+  pricing   Json // Dynamic pricing data
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([startTime, endTime])
+  @@index([isBooked])
+}
+
+// 3. Sustainability Metrics
+model SustainabilityMetrics {
+  id              String    @id @default(cuid())
+  deviceId        String?
+  campaignId      String?
+  date            DateTime
+  energyUsage     Float // kWh
+  carbonFootprint Float // CO2 equivalent
+  device          Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([deviceId])
+  @@index([campaignId])
+  @@index([date])
+}
+
+// 4. User Preferences for personalized settings
+model UserPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  theme           String   @default("system") // light, dark, system
+  emailFrequency  String   @default("daily") // daily, weekly, never
+  dashboardLayout Json? // Saved dashboard layout configuration
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+}
+
+// 5. API Keys for external integrations
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  key         String    @unique
+  permissions Json // Specific permissions for this key
+  lastUsed    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([key])
+}
+
+// 6. Enhanced Audience Data
+model AudienceData {
+  id           String     @id @default(cuid())
+  adDeliveryId String
+  demographics Json? // Age ranges, gender distribution
+  viewerCount  Int
+  dwellTime    Float? // Average time spent viewing
+  timestamp    DateTime
+  adDelivery   AdDelivery @relation(fields: [adDeliveryId], references: [id], onDelete: Cascade)
+
+  @@index([adDeliveryId])
+  @@index([timestamp])
+}
+
+// 7. Integration with external services
+model ExternalIntegration {
+  id          String    @id @default(cuid())
+  name        String
+  provider    String // google_analytics, facebook_ads, etc.
+  credentials Json // Encrypted credentials
+  isActive    Boolean   @default(true)
+  lastSynced  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([provider])
+  @@index([isActive])
+}
+
+// 8. Webhook Configuration
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  secret    String?
+  events    String[] // Array of events to trigger this webhook
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// 9. Login History
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  timestamp DateTime @default(now())
+  ipAddress String
+  device    String?
+  browser   String?
+  location  Json?
+  status    String   @default("success")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([status])
+}
+
+// 10. Partner Security Settings
+model PartnerSecuritySetting {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  twoFactorEnabled        Boolean  @default(false)
+  twoFactorMethod         String   @default("app")
+  loginNotifications      Boolean  @default(true)
+  sessionTimeout          Int      @default(30)
+  lastPasswordChange      DateTime @default(now())
+  passwordExpiryDays      Int      @default(90)
+  ipRestrictions          Json?    @default("[]")
+  allowedDevices          Json?    @default("[]")
+  loginAttempts           Int      @default(0)
+  accountLockoutThreshold Int      @default(5)
+  passwordComplexityLevel String   @default("medium")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// 11. Activity Log
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  description String?
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// Audience Segmentation Models
+model AudienceSegment {
+  id          String      @id @default(cuid())
+  name        String      @db.VarChar(100)
+  description String?     @db.Text
+  type        SegmentType @default(CUSTOM)
+  rules       Json // Array of segmentation rules
+  isActive    Boolean     @default(true)
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  createdBy   User        @relation(fields: [createdById], references: [id])
+  campaigns   Campaign[] // Campaigns targeting this segment
+
+  @@index([createdById])
+  @@index([type])
+  @@index([isActive])
+}
+
+enum SegmentType {
+  DEMOGRAPHIC
+  BEHAVIORAL
+  LOCATION
+  CUSTOM
+}
+
+// Wallet Module Models
+model Wallet {
+  id                String          @id @default(cuid())
+  partnerId         String          @unique
+  balance           Decimal         @default(0) @db.Decimal(10, 2)
+  pendingBalance    Decimal         @default(0) @db.Decimal(10, 2)
+  currency          String          @default("USD")
+  walletStatus      WalletStatus    @default(ACTIVE)
+  autoPayoutEnabled Boolean         @default(false)
+  payoutThreshold   Decimal         @default(100) @db.Decimal(10, 2)
+  nextPayoutDate    DateTime?
+  lastUpdated       DateTime        @updatedAt
+  createdAt         DateTime        @default(now())
+  partner           Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]
+  paymentMethods    PaymentMethod[]
+
+  @@index([partnerId])
+}
+
+model Transaction {
+  id              String            @id @default(cuid())
+  walletId        String
+  type            TransactionType
+  amount          Decimal           @db.Decimal(10, 2)
+  currency        String            @default("USD")
+  status          TransactionStatus @default(PENDING)
+  description     String?           @db.Text
+  reference       String?           @unique
+  paymentMethodId String?
+  date            DateTime          @default(now())
+  processedAt     DateTime?
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  wallet          Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  paymentMethod   PaymentMethod?    @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([walletId])
+  @@index([type])
+  @@index([status])
+  @@index([date])
+}
+
+enum WalletStatus {
+  ACTIVE
+  SUSPENDED
+  LOCKED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  PAYMENT
+  REFUND
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum PaymentType {
+  DEPOSIT
+  WITHDRAWAL
+  REFUND
+  TRANSFER
+  FEE
+}
